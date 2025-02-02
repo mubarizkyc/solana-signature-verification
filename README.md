@@ -8,3 +8,92 @@ The sysvar instructions account provides access to all instructions within the s
 This allows our program to fetch and verify the arguments passed to the Ed25519 program, ensuring they were correctly signed before unlocking funds.
 # Vault Unlock Conditions
 The SOL price must meet or exceed the target threshold & Ed25519 signature must be verified
+# Vault Architecture
+```mermaid
+flowchart TD
+    %% Set Global Styles
+    classDef darkBackground fill:#222222,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
+    classDef boxStyle fill:#333333,stroke:#000000,stroke-width:2,color:#ffffff,font-size:18px;
+    classDef subBoxStyle fill:#444444,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
+    classDef lighterBoxStyle fill:#555555,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
+
+    %% User Actions
+    subgraph User["User Actions"]
+        class User darkBackground
+        Deposit["Deposit SOL + Ed25519 Sig"]
+        Withdraw["Withdraw Request + Ed25519 Sig"]
+    end
+
+    %% Escrow Program
+    subgraph Program["Escrow Program"]
+        class Program boxStyle
+
+        %% Signature Verification
+        subgraph SigVerification["Ed25519 Signature Verification"]
+            class SigVerification subBoxStyle
+            GetIx["Get Previous Instruction"]
+            CheckProgram["Verify Ed25519 Program ID"]
+
+            %% Offset Validation
+            subgraph ValidateOffsets["Offset Validation"]
+                class ValidateOffsets lighterBoxStyle
+                PK["Public Key Offset"]
+                Sig["Signature Offset"]
+                Msg["Message Data Offset"]
+            end
+
+            %% Data Validation
+            subgraph DataValidation["Data Validation"]
+                class DataValidation lighterBoxStyle
+                Indexes["Validate Instruction Indexes"]
+                Size["Validate Data Size"]
+            end
+        end
+
+        %% Program Accounts
+        subgraph Accounts["Program Accounts"]
+            class Accounts subBoxStyle
+            EA["Escrow Account (PDA) - unlock price - escrow amount"]
+        end
+
+        %% Withdrawal Conditions
+        subgraph WithdrawConditions["Withdrawal Conditions"]
+            class WithdrawConditions subBoxStyle
+            Price["Price > unlock price"]
+            Feed["Switchboard Feed"]
+            Checks["Feed Validation - Staleness < 5min - Confidence Interval"]
+
+            %% Fallback Conditions
+            subgraph FallbackConditions["Fallback Conditions"]
+                class FallbackConditions lighterBoxStyle
+                Stale["Feed Age > 24h"]
+                Zero["Feed Account = 0 Lamports"]
+            end
+        end
+    end
+
+    %% Flow Connections
+    Deposit --> GetIx
+    Withdraw --> GetIx
+    GetIx --> CheckProgram
+    CheckProgram --> ValidateOffsets
+    ValidateOffsets --> DataValidation
+    DataValidation --> EA
+
+    EA --> WithdrawConditions
+    Feed --> Price
+    Price --> Checks
+    Stale --> EA
+    Zero --> EA
+    Checks --> EA
+
+    %% Apply Styles
+    class Deposit,Withdraw boxStyle;
+    class GetIx,CheckProgram subBoxStyle;
+    class PK,Sig,Msg,Indexes,Size lighterBoxStyle;
+    class EA subBoxStyle;
+    class Price,Feed,Checks subBoxStyle;
+    class Stale,Zero lighterBoxStyle;
+
+```
+
