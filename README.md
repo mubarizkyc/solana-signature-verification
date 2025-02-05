@@ -11,89 +11,80 @@ The SOL price must meet or exceed the target threshold & Ed25519 signature must 
 # Vault Architecture
 ```mermaid
 flowchart TD
-    %% Set Global Styles
-    classDef darkBackground fill:#222222,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
-    classDef boxStyle fill:#333333,stroke:#000000,stroke-width:2,color:#ffffff,font-size:18px;
-    classDef subBoxStyle fill:#444444,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
-    classDef lighterBoxStyle fill:#555555,stroke:#000000,stroke-width:2,color:#ffffff,font-size:16px;
+    %% Style Definitions - GitHub Monochrome Colors
+    classDef darkBackground fill:#24292e,stroke:#1b1f23,stroke-width:2,color:#ffffff,font-size:24px
+    classDef boxStyle fill:#2f363d,stroke:#1b1f23,stroke-width:2,color:#ffffff,font-size:22px
+    classDef subBoxStyle fill:#444d56,stroke:#1b1f23,stroke-width:2,color:#ffffff,font-size:20px
+    classDef lighterBoxStyle fill:#586069,stroke:#1b1f23,stroke-width:2,color:#ffffff,font-size:20px
 
-    %% User Actions
-    subgraph User["User Actions"]
-        class User darkBackground
+    %% User Entry Points
+    subgraph UserActions["User Actions"]
+        direction TB
+        class UserActions darkBackground
         Deposit["Deposit SOL + Ed25519 Sig"]
-        Withdraw["Withdraw Request + Ed25519 Sig"]
+        Withdraw["Withdraw Request + Ed25519 Sig + Feed ID"]
     end
 
-    %% Escrow Program
-    subgraph Program["Escrow Program"]
-        class Program boxStyle
-
+    %% Program Logic
+    subgraph ProgramFlow["Escrow Program"]
+        class ProgramFlow boxStyle
+        
         %% Signature Verification
         subgraph SigVerification["Ed25519 Signature Verification"]
             class SigVerification subBoxStyle
-            GetIx["Get Previous Instruction"]
-            CheckProgram["Verify Ed25519 Program ID"]
-
-            %% Offset Validation
-            subgraph ValidateOffsets["Offset Validation"]
-                class ValidateOffsets lighterBoxStyle
-                PK["Public Key Offset"]
-                Sig["Signature Offset"]
-                Msg["Message Data Offset"]
-            end
-
-            %% Data Validation
-            subgraph DataValidation["Data Validation"]
-                class DataValidation lighterBoxStyle
-                Indexes["Validate Instruction Indexes"]
-                Size["Validate Data Size"]
+            GetPrevIx["Get Previous Instruction"]
+            VerifyProgram["Verify Ed25519 Program ID"]
+            
+            subgraph OffsetValidation["Signature Offset Validation"]
+                class OffsetValidation lighterBoxStyle
+                ValidatePK["Validate Public Key Offset"]
+                ValidateSig["Validate Signature Offset"]
+                ValidateMsg["Validate Message Data"]
+                VerifyIndices["Verify Instruction Indices Match"]
             end
         end
 
-        %% Program Accounts
-        subgraph Accounts["Program Accounts"]
-            class Accounts subBoxStyle
-            EA["Escrow Account (PDA) - unlock price - escrow amount"]
-        end
+        %% Main Operations
+        subgraph Operations["Program Operations"]
+            class Operations subBoxStyle
+            
+            subgraph DepositFlow["Deposit Handler"]
+                class DepositFlow lighterBoxStyle
+                UpdateState["Update Escrow State:
+                - Set unlock_price
+                - Set escrow_amount"]
+                TransferToEscrow["Transfer SOL to Escrow Account"]
+            end
 
-        %% Withdrawal Conditions
-        subgraph WithdrawConditions["Withdrawal Conditions"]
-            class WithdrawConditions subBoxStyle
-            Price["Price > unlock price"]
-            Feed["Switchboard Feed"]
-            Checks["Feed Validation - Staleness < 5min - Confidence Interval"]
-
-            %% Fallback Conditions
-            subgraph FallbackConditions["Fallback Conditions"]
-                class FallbackConditions lighterBoxStyle
-                Stale["Feed Age > 24h"]
-                Zero["Feed Account = 0 Lamports"]
+            subgraph WithdrawFlow["Withdraw Handler"]
+                class WithdrawFlow lighterBoxStyle
+                GetPrice["Get Price from Pyth"]
+                PriceCheck["Check if price > unlock_price"]
+                TransferToUser["Transfer SOL to User"]
             end
         end
     end
 
     %% Flow Connections
-    Deposit --> GetIx
-    Withdraw --> GetIx
-    GetIx --> CheckProgram
-    CheckProgram --> ValidateOffsets
-    ValidateOffsets --> DataValidation
-    DataValidation --> EA
-
-    EA --> WithdrawConditions
-    Feed --> Price
-    Price --> Checks
-    Stale --> EA
-    Zero --> EA
-    Checks --> EA
+    Deposit --> GetPrevIx
+    Withdraw --> GetPrevIx
+    GetPrevIx --> VerifyProgram
+    VerifyProgram --> OffsetValidation
+    ValidatePK & ValidateSig & ValidateMsg --> VerifyIndices
+    
+    VerifyIndices -->|"Signature Valid"| Operations
+    VerifyIndices -->|"Invalid"| Error["Return Signature Error"]
+    
+    Operations --> DepositFlow
+    Operations --> WithdrawFlow
+    
+    GetPrice --> PriceCheck
+    PriceCheck -->|"Price > Unlock Price"| TransferToUser
+    PriceCheck -->|"Price <= Unlock Price"| WithdrawError["Return Invalid Withdrawal Error"]
 
     %% Apply Styles
-    class Deposit,Withdraw boxStyle;
-    class GetIx,CheckProgram subBoxStyle;
-    class PK,Sig,Msg,Indexes,Size lighterBoxStyle;
-    class EA subBoxStyle;
-    class Price,Feed,Checks subBoxStyle;
-    class Stale,Zero lighterBoxStyle;
-
+    class Deposit,Withdraw boxStyle
+    class GetPrevIx,VerifyProgram,Error,WithdrawError subBoxStyle
+    class UpdateState,TransferToEscrow,GetPrice,CheckAge,PriceCheck,TransferToUser lighterBoxStyle
 ```
 
