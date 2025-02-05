@@ -3,61 +3,38 @@ use crate::state::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::solana_program::sysvar;
-use std::str::FromStr;
-use switchboard_solana::{AggregatorAccountData, SwitchboardDecimal};
+use pyth_solana_receiver_sdk::price_update::{get_feed_id_from_hex, PriceUpdateV2};
 
-pub fn withdraw_handler(ctx: Context<Withdraw>, params: WithdrawParams) -> Result<()> {
-    // Load the data from the Switchboard feed aggregator
-    let feed = &ctx.accounts.feed_aggregator.load()?;
+pub fn withdraw_handler(ctx: Context<Withdraw>, id: String) -> Result<()> {
+    let price_update = &mut ctx.accounts.price_update;
+    let maximum_age: u64 = 30;
+    let feed_id: [u8; 32] = get_feed_id_from_hex(&id)?;
+    let price = price_update.get_price_no_older_than(&Clock::get()?, maximum_age, &feed_id)?;
+
+    msg!(
+        "The price is ({} ± {}) * 10^{}",
+        price.price,
+        price.conf,
+        price.exponent
+    );
+    let actual_price: i128 = (price.price as i128)
+        .checked_mul(10i128.pow(price.exponent.unsigned_abs()))
+        .ok_or(ProgramError::InvalidArgument)?;
+
     let escrow_state = &ctx.accounts.escrow_account;
-
-    // Retrieve the latest feed result (current price value)
-    let val: f64 = feed.get_result()?.try_into()?;
-    let current_timestamp = Clock::get().unwrap().unix_timestamp;
-    let mut valid_transfer: bool = false;
-
-    msg!("Current feed result is {}!", val);
+    let unlock_price = escrow_state.unlock_price as i128;
+    msg!("Current feed result is {}!", actual_price);
     msg!("Unlock price is {}", escrow_state.unlock_price);
-    //  if the latest price update was more than 24 hours ago
-    if (current_timestamp - feed.latest_confirmed_round.round_open_timestamp) > 86400 {
-        valid_transfer = true;
-    }
-    // if the feed aggregator has zero lamports
-    else if **ctx
-        .accounts
-        .feed_aggregator
-        .to_account_info()
-        .try_borrow_lamports()?
-        == 0
-    {
-        valid_transfer = true;
-    }
-    // if the price feed value exceeds the unlock price->allow transfer
-    else if val > escrow_state.unlock_price as f64 {
-        // Normal Use Case
 
-        // check feed does not exceed max_confidence_interval
-        if let Some(max_confidence_interval) = params.max_confidence_interval {
-            feed.check_confidence_interval(SwitchboardDecimal::from_f64(max_confidence_interval))
-                .map_err(|_| error!(EscrowErrorCode::ConfidenceIntervalExceeded))?;
-        }
-        // if the price feed is stale
-        feed.check_staleness(current_timestamp, 300)
-            .map_err(|_| error!(EscrowErrorCode::StaleFeed))?;
-
-        valid_transfer = true;
-    }
-
-    // If  valid transfer are met, proceed with the fund transfer
-    if valid_transfer {
-        // Subtract the escrow amount from the escrow account's lamports
+    if actual_price > unlock_price {
+        // Subtract the escrow amount from the escrow account's
         **escrow_state.to_account_info().try_borrow_mut_lamports()? = escrow_state
             .to_account_info()
             .lamports()
             .checked_sub(escrow_state.escrow_amount)
             .ok_or(ProgramError::InsufficientFunds)?;
 
-        // Add the escrow amount to the user's account lamports
+        // Add the escrow amount to the user's account
         **ctx
             .accounts
             .user
@@ -77,6 +54,7 @@ pub fn withdraw_handler(ctx: Context<Withdraw>, params: WithdrawParams) -> Resul
 }
 
 #[derive(Accounts)]
+#[instruction(id:String)]
 pub struct Withdraw<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
@@ -88,18 +66,9 @@ pub struct Withdraw<'info> {
         close = user
     )]
     pub escrow_account: Account<'info, EscrowState>,
-    // Switchboard SOL feed aggregator
-    #[account(
-        address = Pubkey::from_str(SOL_USDC_FEED).unwrap()
-    )]
-    pub feed_aggregator: AccountLoader<'info, AggregatorAccountData>,
+    pub price_update: Account<'info, PriceUpdateV2>,
     pub system_program: Program<'info, System>,
     /// CHECK: Safe because it's a sysvar account
     #[account(address = sysvar::instructions::ID)]
     pub instructions: AccountInfo<'info>,
-}
-
-#[derive(Clone, AnchorSerialize, AnchorDeserialize)]
-pub struct WithdrawParams {
-    pub max_confidence_interval: Option<f64>,
 }

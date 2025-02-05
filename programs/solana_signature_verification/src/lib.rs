@@ -23,10 +23,11 @@ pub mod solana_signature_verification {
         }
     }
     // Withdraw funds from the escrow account based on Switchboard feed data
-    pub fn withdraw(ctx: Context<Withdraw>, params: WithdrawParams) -> Result<()> {
+    pub fn withdraw(ctx: Context<Withdraw>, feed_id: String) -> Result<()> {
         let sysvar_ix = &ctx.accounts.instructions.to_account_info();
+
         if verify_ed25519_ix(sysvar_ix).is_ok() {
-            withdraw_handler(ctx, params)
+            withdraw_handler(ctx, feed_id)
         } else {
             Err(SignatureVerificationError::NotSigVerified.into())
         }
