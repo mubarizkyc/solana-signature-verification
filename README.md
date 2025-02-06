@@ -87,4 +87,6 @@ flowchart TD
     class GetPrevIx,VerifyProgram,Error,WithdrawError subBoxStyle
     class UpdateState,TransferToEscrow,GetPrice,CheckAge,PriceCheck,TransferToUser lighterBoxStyle
 ```
-
+## Imp Links
+making client request from pyth https://github.com/pyth-network/pyth-crosschain/tree/main/target_chains/solana/sdk/js/pyth_solana_receiver
+use rpc-websockets 7.11.0       https://stackoverflow.com/questions/78566652/solana-web3-js-cannot-find-module-rpc-websockets-dist-lib-client
